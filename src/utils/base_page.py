@@ -1,0 +1,301 @@
+import os
+import time
+import logging
+from typing import Optional
+from selenium import webdriver
+from selenium.webdriver import ActionChains
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import (
+    TimeoutException, WebDriverException,
+    NoSuchElementException
+)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class BasePage:
+    """Common Selenium helpers with shared retry and logging behavior."""
+
+    def __init__(self, driver: webdriver.Chrome, default_timeout: int = 10):
+        self.driver = driver
+        self.default_timeout = default_timeout
+
+    def _resolve_timeout(self, timeout: Optional[int]) -> int:
+        return timeout if timeout is not None else self.default_timeout
+
+    def click_element(self, by_locator):
+        element = WebDriverWait(self.driver, 20).until(EC.element_to_be_clickable(by_locator))
+        self.driver.execute_script(
+            "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'nearest'})", element)
+        element.click()
+
+    def click_element_by_js(self, by_locator, timeout: Optional[int] = None) -> bool:
+        timeout = self._resolve_timeout(timeout)
+
+        def _js_click():
+            try:
+                element = WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable(by_locator))
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'nearest'})",
+                    element,
+                )
+                time.sleep(0.5)
+                self.driver.execute_script("arguments[0].click();", element)
+                time.sleep(0.5)
+                return True
+            except TimeoutException:
+                logger.error(f"Element not found for JS click within {timeout} seconds: {by_locator}")
+                return False
+            except WebDriverException as e:
+                logger.error(f"JavaScript execution failed: {e}")
+                return False
+
+        try:
+            return _js_click()
+        except Exception as e:
+            logger.error(f"Critical error in click_element_by_js: {e}")
+            return False
+
+    def move_to_element(self, locator, timeout: Optional[int] = None) -> bool:
+        timeout = self._resolve_timeout(timeout)
+
+        def _move():
+            try:
+                element = WebDriverWait(self.driver, timeout).until(EC.visibility_of_element_located(locator))
+                actions = ActionChains(self.driver)
+                actions.move_to_element(element).perform()
+                time.sleep(0.3)
+                return True
+            except TimeoutException:
+                logger.error(f"Element not visible for hover within {timeout} seconds: {locator}")
+                return False
+            except WebDriverException as e:
+                logger.error(f"Action chain error: {e}")
+                return False
+
+        try:
+            return _move()
+        except Exception as e:
+            logger.error(f"Critical error in move_to_element: {e}")
+            return False
+
+    def get_element_text(self, by_locator, timeout=2, default: str = "") -> str:
+        timeout = self._resolve_timeout(timeout)
+        try:
+            element = WebDriverWait(self.driver, timeout).until(EC.visibility_of_element_located(by_locator))
+            text = element.text.strip()
+            return text if text else default
+        except TimeoutException:
+            logger.warning(f"Element not visible for text extraction within {timeout} seconds: {by_locator}")
+            return default
+        except (NoSuchElementException, WebDriverException) as e:
+            logger.error(f"Error getting element text: {e}")
+            return default
+        except Exception as e:
+            logger.error(f"Unexpected error in get_element_text: {e}")
+            return default
+
+    @staticmethod
+    def get_undetected_driver(headless: bool = False, max_retries: int = 3) -> Optional[webdriver.Chrome]:
+        for attempt in range(max_retries):
+            driver = None
+            try:
+                options = webdriver.ChromeOptions()
+                path = rf'{BASE_DIR}\\chrome-dir'
+                if not os.path.exists(path):
+                    try:
+                        os.makedirs(path, exist_ok=True)
+                        logger.info(f"Created chrome directory: {path}")
+                    except OSError as e:
+                        logger.error(f"Failed to create chrome directory: {e}")
+                        path = None
+                if path:
+                    options.add_argument(f'--user-data-dir={path}')
+                options.add_argument("--log-level=3")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_argument("--disable-extensions")
+                options.add_argument("--disable-plugins")
+                options.add_argument("--disable-images")
+                options.add_argument("--disable-javascript")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-background-timer-throttling")
+                options.add_argument("--disable-backgrounding-occluded-windows")
+                options.add_argument("--disable-renderer-backgrounding")
+                options.add_argument("--disable-features=TranslateUI")
+                options.add_argument("--disable-ipc-flooding-protection")
+                if headless:
+                    options.add_argument("--headless")
+                    options.add_argument("--disable-gpu")
+                    options.add_argument("--window-size=1920,1080")
+                else:
+                    options.add_argument("--start-maximized")
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_experimental_option('useAutomationExtension', False)
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=options)
+                time.sleep(3)
+                stealth_js = """
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                window.chrome = {runtime: {}};
+                """
+                driver.execute_script(stealth_js)
+                driver.get("data:,")
+                logger.info(f"Chrome driver initialized successfully (attempt {attempt + 1})")
+                return driver
+            except Exception as e:
+                logger.error(f"Driver creation attempt {attempt + 1} failed: {e}")
+                if driver:
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying driver creation... Attempts left: {max_retries - attempt - 1}")
+                    time.sleep(3)
+                else:
+                    logger.error("Max retries exceeded. Could not create the driver.")
+                    return None
+        return None
+
+    def check_element_exists(self, by_locator, timeout=2) -> bool:
+        timeout = self._resolve_timeout(timeout)
+        try:
+            WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located(by_locator))
+            return True
+        except TimeoutException:
+            return False
+        except (NoSuchElementException, WebDriverException):
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error in check_element_exists: {e}")
+            return False
+
+    def wait_for_page_load(self, timeout: Optional[int] = None) -> bool:
+        timeout = self._resolve_timeout(timeout or 30)
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            time.sleep(1)
+            return True
+        except TimeoutException:
+            logger.warning(f"Page load timeout after {timeout} seconds")
+            return False
+        except WebDriverException as e:
+            logger.error(f"Error waiting for page load: {e}")
+            return False
+
+    def safe_navigate_to_url(self, url: str, max_retries: int = 3) -> bool:
+        for attempt in range(max_retries):
+            try:
+                self.driver.get(url)
+                if self.wait_for_page_load():
+                    logger.info(f"Successfully navigated to: {url}")
+                    return True
+                logger.warning(f"Page load incomplete for: {url}")
+            except WebDriverException as e:
+                logger.error(f"Navigation attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+        logger.error(f"Failed to navigate to {url} after {max_retries} attempts")
+        return False
+
+    def get_element_attribute(self, by_locator, attribute: str, timeout: Optional[int] = None, default: str = "") -> str:
+        timeout = self._resolve_timeout(timeout)
+        try:
+            element = WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located(by_locator))
+            attr_value = element.get_attribute(attribute)
+            return attr_value if attr_value is not None else default
+        except TimeoutException:
+            logger.warning(f"Element not found for attribute '{attribute}' within {timeout} seconds: {by_locator}")
+            return default
+        except Exception as e:
+            logger.error(f"Error getting element attribute '{attribute}': {e}")
+            return default
+
+    def shift_to_next_tab(self):
+        try:
+            time.sleep(1)
+            if len(self.driver.window_handles) > 1:
+                self.driver.switch_to.window(self.driver.window_handles[-1])
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error switching to next tab: {e}")
+
+    def close_current_tab_and_switch_back(self):
+        try:
+            if len(self.driver.window_handles) > 1:
+                self.driver.close()
+                self.driver.switch_to.window(self.driver.window_handles[-1])
+                time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error closing current tab and switching back: {e}")
+
+    def switch_to_tab_by_index(self, index: int):
+        try:
+            if 0 <= index < len(self.driver.window_handles):
+                self.driver.switch_to.window(self.driver.window_handles[index])
+                time.sleep(1)
+            else:
+                logger.error(f"Tab index {index} is out of range.")
+        except Exception as e:
+            logger.error(f"Error switching to tab by index {index}: {e}")
+
+    def click_using_action_chain(self, by_locator, timeout: Optional[int] = None) -> bool:
+        timeout = self._resolve_timeout(timeout)
+
+        def _action_chain_click():
+            try:
+                element = WebDriverWait(self.driver, timeout).until(EC.element_to_be_clickable(by_locator))
+                actions = ActionChains(self.driver)
+                actions.move_to_element(element).click().perform()
+                time.sleep(0.5)
+                return True
+            except TimeoutException:
+                logger.error(f"Element not found for Action Chain click within {timeout} seconds: {by_locator}")
+                return False
+            except WebDriverException as e:
+                logger.error(f"Action Chain execution failed: {e}")
+                return False
+
+        try:
+            return _action_chain_click()
+        except Exception as e:
+            logger.error(f"Critical error in click_using_action_chain: {e}")
+            return False
+
+    def find_element_using_WebDriverWait(self, by_locator, timeout=3):
+        try:
+            element = WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located(by_locator))
+            return element
+        except TimeoutException:
+            logger.error(f"Element not found within {self.default_timeout} seconds.")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error in find_element_using_WebDriverWait: {e}")
+            return None
+
+    def input_element(self, by_locator, text):
+        element = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(by_locator))
+        self.driver.execute_script(
+            "arguments[0].scrollIntoView({behavior: 'smooth', block: 'center', inline: 'nearest'})", element)
+        WebDriverWait(self.driver, 10).until(EC.visibility_of_element_located(by_locator)).send_keys(Keys.CONTROL, '\A',
+                                                                                                     '\b')
+        WebDriverWait(self.driver, 10).until(EC.visibility_of_element_located(by_locator)).send_keys(text)
+
+    def open_new_tab(self, url: str):
+        self.driver.execute_script("window.open('');")
+        self.driver.switch_to.window(self.driver.window_handles[-1])
+        self.safe_navigate_to_url(url)

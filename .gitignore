@@ -1,0 +1,11 @@
+venv/
+src/utils/chrome-dir
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.idea/
+.vscode/
+*.log
+data/amazon-asins.csv
+data/done_asins.txt
