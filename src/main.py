@@ -3,7 +3,7 @@ from utils import base_page
 from utils.base_page import BasePage
 from core.amazon_scraper import AmazonScraper
 from core.vendoo_uploader import VendooUploader
-from src.utils.static import (
+from utils.static import (
     read_csv_data, asin_already_processed,
     save_asin_to_done_list, delete_directory,
     save_images_to_directory

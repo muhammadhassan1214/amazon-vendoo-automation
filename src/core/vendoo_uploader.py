@@ -2,8 +2,11 @@ import os
 import time
 import glob
 from dotenv import load_dotenv
-from src.utils.base_page import BasePage
-from src.core.locators import VendooLocators as vl
+try:
+    from utils.base_page import BasePage
+except Exception:
+    from ..utils.base_page import BasePage
+from .locators import VendooLocators as vl
 
 
 load_dotenv()

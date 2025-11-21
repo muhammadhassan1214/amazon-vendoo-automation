@@ -1,8 +1,12 @@
 import time
 from typing import Any
 from lxml.html import fromstring
-from src.core.locators import AmazonLocators as al
-from src.utils.base_page import BasePage
+from .locators import AmazonLocators as al
+try:
+    from utils.base_page import BasePage
+except Exception:
+    # Fallback for package-style runs (python -m src.main)
+    from ..utils.base_page import BasePage
 
 
 class AmazonScraper(BasePage):
