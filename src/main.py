@@ -6,7 +6,7 @@ from core.vendoo_uploader import VendooUploader
 from utils.static import (
     read_csv_data, asin_already_processed,
     save_asin_to_done_list, delete_directory,
-    save_images_to_directory
+    save_images_to_directory, show_process_summary
 )
 
 
@@ -36,7 +36,7 @@ class MainApp:
                 item_found = self.scraper.expand_result_item()
                 if not item_found:
                     base_page.logger.warning(f"ASIN {asin} not found in search results, Skiping...")
-                    save_asin_to_done_list(asin)
+                    save_asin_to_done_list(asin, asin_is_processed=False)
                     count_1 += 1
                     continue
                 title, upc_code = self.scraper.click_result_link()
@@ -52,6 +52,8 @@ class MainApp:
                 count_1 += 1
                 count_2 += 1
             time.sleep(1)
+            print(f'{"=" * 50}\nSummary\n{"=" * 50}')
+            show_process_summary()
         except Exception as e:
             base_page.logger.error(f"An error occurred: {e}")
         finally:

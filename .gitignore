@@ -11,3 +11,4 @@ __pycache__/
 *.zip
 data/amazon-asins.csv
 data/done_asins.txt
+error/

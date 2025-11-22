@@ -3,15 +3,16 @@ import csv
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
-
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 csv_path = os.path.join(project_root, "data", "amazon-asins.csv")
 done_file_path = os.path.join(project_root, "data", "done_asins.txt")
+unable_to_process_asins = os.path.join(project_root, "data", "unable_to_process_asins.txt")
 
-def read_csv_data():
+
+def read_csv_data(file_path=csv_path):
     data = []
     try:
-        with open(csv_path, mode="r", encoding="utf-8", newline="") as csvfile:
+        with open(file_path, mode="r", encoding="utf-8", newline="") as csvfile:
             reader = csv.reader(csvfile)
             next(reader, None)
             for row in reader:
@@ -21,12 +22,18 @@ def read_csv_data():
                         data.append(asin)
         return data
     except FileNotFoundError:
-        print(f"Error: The file '{csv_path}' was not found.")
+        print(f"Error: The file '{file_path}' was not found.")
         return None
 
-def save_asin_to_done_list(asin: str):
+
+def save_asin_to_done_list(asin: str, asin_is_processed: bool = True):
+    if not asin_is_processed:
+        with open(unable_to_process_asins, "a") as file:
+            file.write(f"{asin}\n")
+        return
     with open(done_file_path, "a") as file:
         file.write(f"{asin}\n")
+
 
 def asin_already_processed(asin: str):
     if not os.path.isfile(done_file_path):
@@ -35,10 +42,12 @@ def asin_already_processed(asin: str):
         done_asins = {line.strip() for line in file}
     return asin in done_asins
 
+
 def create_directory(asin):
     directory = os.path.join(project_root, "images", asin)
     os.makedirs(directory, exist_ok=True)
     return directory
+
 
 def download_image(session, image_url: str, folder_path: str, image_name: str) -> bool:
     """
@@ -66,34 +75,28 @@ def download_image(session, image_url: str, folder_path: str, image_name: str) -
 
 
 def save_images_to_directory(image_urls: list, asin: str):
-    # 1. Create directory ONCE before starting threads
-    directory = create_directory(asin)  # Assuming you have this helper, or use os.makedirs
+    directory = create_directory(asin)
     if not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
 
-    # 2. Use a Session for speed (Keep-Alive)
     with requests.Session() as session:
-        # Headers help avoid Amazon blocking purely programmatic requests
+
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         })
 
-        # 3. Create a ThreadPool to download in parallel
-        # max_workers=5 means 5 downloads happen at the exact same time
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = []
             for idx, url in enumerate(image_urls):
                 file_name = f"{idx + 1}.jpg"
                 # Submit the task to the pool
-                futures.append(
-                    executor.submit(download_image, session, url, directory, file_name)
-                )
+                futures.append(executor.submit(download_image, session, url, directory, file_name))
 
-            # Optional: Wait for all to complete and check results
             for future in futures:
-                future.result()  # This will re-raise any exceptions caught during execution
+                future.result()
 
     return directory
+
 
 def delete_directory(asin: str):
     directory = os.path.join(project_root, "images", asin)
@@ -109,3 +112,33 @@ def delete_directory(asin: str):
             os.rmdir(directory)
         except Exception as e:
             print(f"Error deleting directory {directory}: {e}")
+
+
+def read_done_asins(file_path=done_file_path):
+    done_asins = set()
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            for line in file:
+                done_asins.add(line.strip())
+    except FileNotFoundError:
+        print(f"Error: done_asins.txt was not found.")
+    return done_asins
+
+
+def show_process_summary():
+    try:
+        csv_asins = read_csv_data(file_path=csv_path)
+        done_asins = read_done_asins(file_path=done_file_path)
+        unprocess_asins = read_done_asins(file_path=unable_to_process_asins)
+
+        if csv_asins is None:
+            print("No ASINs found in CSV.")
+            return
+
+        unprocessed_asins = set(csv_asins) - done_asins - unprocess_asins
+
+        print(f"Total ASINs in CSV: {len(csv_asins)}")
+        print(f"Total processed ASINs: {len(done_asins)}")
+        print(f"Total unprocessed ASINs: {len(unprocessed_asins)}")
+    except:
+        print("No ASINs found in CSV.")
