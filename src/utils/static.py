@@ -1,6 +1,8 @@
 import os
 import csv
 import requests
+from concurrent.futures import ThreadPoolExecutor
+
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 csv_path = os.path.join(project_root, "data", "amazon-asins.csv")
@@ -13,8 +15,8 @@ def read_csv_data():
             reader = csv.reader(csvfile)
             next(reader, None)
             for row in reader:
-                if len(row) > 6:
-                    asin = row[6].strip()
+                if len(row) > 5:
+                    asin = row[5].strip()
                     if asin:
                         data.append(asin)
         return data
@@ -38,34 +40,59 @@ def create_directory(asin):
     os.makedirs(directory, exist_ok=True)
     return directory
 
-def download_image(image_url: str, folder_path: str, image_name: str) -> bool:
-    try:
-        os.makedirs(folder_path, exist_ok=True)
-    except OSError as e:
-        print(f"Error creating directory {folder_path}: {e}")
-        return False
+def download_image(session, image_url: str, folder_path: str, image_name: str) -> bool:
+    """
+    Downloads a single image using an existing session.
+    """
     full_path = os.path.join(folder_path, image_name)
+
+    # Skip if already exists
     if os.path.isfile(full_path):
         return True
+
     try:
-        response = requests.get(image_url, stream=True, timeout=10)
+        # Use the passed session for connection pooling
+        response = session.get(image_url, stream=True, timeout=10)
         response.raise_for_status()
+
         with open(full_path, 'wb') as file:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     file.write(chunk)
         return True
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading image from {image_url}: {e}")
-        return False
-    except IOError as e:
-        print(f"Error writing file to {full_path}: {e}")
+    except Exception as e:
+        print(f"Failed to download {image_url}: {e}")
         return False
 
+
 def save_images_to_directory(image_urls: list, asin: str):
-    directory = create_directory(asin)
-    for idx, url in enumerate(image_urls):
-        download_image(url, directory, f"{idx + 1}.jpg")
+    # 1. Create directory ONCE before starting threads
+    directory = create_directory(asin)  # Assuming you have this helper, or use os.makedirs
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
+    # 2. Use a Session for speed (Keep-Alive)
+    with requests.Session() as session:
+        # Headers help avoid Amazon blocking purely programmatic requests
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        })
+
+        # 3. Create a ThreadPool to download in parallel
+        # max_workers=5 means 5 downloads happen at the exact same time
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = []
+            for idx, url in enumerate(image_urls):
+                file_name = f"{idx + 1}.jpg"
+                # Submit the task to the pool
+                futures.append(
+                    executor.submit(download_image, session, url, directory, file_name)
+                )
+
+            # Optional: Wait for all to complete and check results
+            for future in futures:
+                future.result()  # This will re-raise any exceptions caught during execution
+
     return directory
 
 def delete_directory(asin: str):

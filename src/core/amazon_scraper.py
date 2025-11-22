@@ -19,7 +19,7 @@ class AmazonScraper(BasePage):
         login_btn = self.check_element_exists(al.login_button, timeout=3)
         if login_btn:
             self.click_element_by_js(al.login_button)
-            input("Log In and Press Enter key to continue...")
+            input("\nLog In and Press Enter key to continue...")
 
     def go_to_amazon_seller_central(self):
         self.click_element_by_js(al.nav_button)
@@ -38,13 +38,19 @@ class AmazonScraper(BasePage):
             self.input_element(button_1, product_asin)
         self.click_element_by_js(button_2)
 
+    def expand_result_item(self):
+        element = self.find_element_using_WebDriverWait(al.result_item, timeout=2)
+        if not element:
+            return False
+        self.click_element_by_js(al.result_item)
+        return True
+
     def click_result_link(self) -> str | tuple[Any, str]:
-        self.click_element(al.result_item)
         element = self.find_element_using_WebDriverWait(al.result_link, timeout=5)
         if not element:
             return ""
         title, link = element.get_attribute("label").strip(), element.get_attribute("href")
-        upc = self.get_element_text(al.upc)
+        upc = self.get_element_text(al.upc, timeout=1)
         upc_code = upc.split("UPC:")[-1].strip() if "UPC:" in upc else ""
         self.open_new_tab(link)
         return title, upc_code

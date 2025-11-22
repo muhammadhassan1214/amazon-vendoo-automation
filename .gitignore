@@ -1,4 +1,5 @@
 venv/
+images/
 src/utils/chrome-dir
 __pycache__/
 *.pyc

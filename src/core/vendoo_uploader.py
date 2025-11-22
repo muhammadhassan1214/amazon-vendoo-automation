@@ -53,7 +53,8 @@ class VendooUploader(BasePage):
         time.sleep(1)
         self.input_element(vl.title_input, title)
         self.input_element(vl.price_input, price)
-        self.input_element(vl.notes_input, f"ASIN: {asin}\nUPC: {upc_code}")
+        note = f"ASIN: {asin}{f'\nUPC: {upc_code}' if upc_code else ''}"
+        self.input_element(vl.notes_input, note)
         self.click_element(vl.save_button)
         time.sleep(1)  # Wait for save to complete
         self.switch_to_tab_by_index(0)
